@@ -3,7 +3,7 @@ import telebot
 import logging
 import time
 import schedule
-import sqlite3
+import pyodbc  # For Microsoft SQL Server
 from datetime import datetime
 from telebot.types import Update
 
@@ -29,26 +29,35 @@ ADMIN_ID = 123456789
 # Database Connection & Setup
 # ---------------------------
 
-# Database connection
-conn = sqlite3.connect('bot_storage.db', check_same_thread=False)
+# Connection to SQL Server
+conn_str = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=your_server_name;"  # Replace with your server name or IP
+    "DATABASE=your_database_name;"  # Replace with your database name
+    "UID=your_username;"  # Replace with your username
+    "PWD=your_password;"  # Replace with your password
+)
+conn = pyodbc.connect(conn_str)
 cursor = conn.cursor()
 
-# Create table for chat information
+# Create table for chat information if it doesn't exist
 cursor.execute('''
-    CREATE TABLE IF NOT EXISTS chat_info (
-        chat_id INTEGER PRIMARY KEY,
-        title TEXT,
-        type TEXT,
-        added_at TEXT
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'chat_info')
+    CREATE TABLE chat_info (
+        chat_id BIGINT PRIMARY KEY,
+        title NVARCHAR(255),
+        type NVARCHAR(50),
+        added_at DATETIME
     )
 ''')
 
-# Create table for logging messages
+# Create table for logging messages if it doesn't exist
 cursor.execute('''
-    CREATE TABLE IF NOT EXISTS message_logs (
-        chat_id INTEGER,
-        message_text TEXT,
-        timestamp TEXT
+    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'message_logs')
+    CREATE TABLE message_logs (
+        chat_id BIGINT,
+        message_text NVARCHAR(MAX),
+        timestamp DATETIME
     )
 ''')
 
@@ -63,9 +72,10 @@ def store_chat_info(chat_id, chat_title, chat_type):
     Store chat information in the database.
     """
     cursor.execute('''
-        INSERT OR IGNORE INTO chat_info (chat_id, title, type, added_at)
+        IF NOT EXISTS (SELECT 1 FROM chat_info WHERE chat_id = ?)
+        INSERT INTO chat_info (chat_id, title, type, added_at)
         VALUES (?, ?, ?, ?)
-    ''', (chat_id, chat_title, chat_type, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    ''', (chat_id, chat_id, chat_title, chat_type, datetime.now()))
     conn.commit()
     logging.info(f"Stored chat info: {chat_id} - {chat_title} ({chat_type})")
 
@@ -76,7 +86,7 @@ def log_message(chat_id, message_text):
     cursor.execute('''
         INSERT INTO message_logs (chat_id, message_text, timestamp)
         VALUES (?, ?, ?)
-    ''', (chat_id, message_text, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    ''', (chat_id, message_text, datetime.now()))
     conn.commit()
 
 def send_message(chat_id, message):
